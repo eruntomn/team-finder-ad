@@ -1,5 +1,4 @@
 from django import forms
-
 from .models import Project
 
 
@@ -9,12 +8,8 @@ class ProjectForm(forms.ModelForm):
         fields = ['name', 'description', 'github_url', 'status']
         widgets = {
             'name': forms.TextInput(attrs={'placeholder': 'Название проекта'}),
-            'description': forms.Textarea(
-                attrs={'rows': 5, 'placeholder': 'Описание проекта'}
-            ),
-            'github_url': forms.URLInput(
-                attrs={'placeholder': 'https://github.com/username/repo'}
-            ),
+            'description': forms.Textarea(attrs={'rows': 5, 'placeholder': 'Описание проекта'}),
+            'github_url': forms.URLInput(attrs={'placeholder': 'https://github.com/username/repo'}),
             'status': forms.Select(choices=Project.STATUS_CHOICES),
         }
 
@@ -23,6 +18,5 @@ class ProjectForm(forms.ModelForm):
         if url:
             if not url.startswith('https://github.com/'):
                 raise forms.ValidationError(
-                    'Ссылка должна вести на GitHub (https://github.com/...)'
-                )
+                    'Ссылка должна вести на GitHub (https://github.com/...)')
         return url

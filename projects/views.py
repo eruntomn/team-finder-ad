@@ -1,293 +1,66 @@
-from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import (
-    require_GET,
-    require_http_methods,
-    require_POST,
-)
+from django.views.decorators.http import require_http_methods
 
-from .forms import (
-    CustomPasswordChangeForm,
-    EditProfileForm,
-    LoginForm,
-    ProjectForm,
-    RegisterForm,
-)
-from .models import Project, User
+from skills.models import Skill
+
+from .forms import ProjectForm
+from .models import Project
+
+# Create your views here.
 
 
-@require_GET
-def root_redirect(request):
-    return redirect('/projects/list/')
-
-
-@require_GET
 def project_list(request):
-    projects = (
-        Project.objects.select_related('owner')
-        .prefetch_related('participants', 'interested_users')
-        .order_by('-created_at')
-    )
-    paginator = Paginator(projects, 9)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    projects = Project.objects.filter(status='open').order_by('-created_at')
     return render(
-        request,
-        'projects/project_list.html',
-        {
-            'projects': projects,
-            'page_obj': page_obj,
-            'query_prefix': '',
-        },
+        request, 'projects/project_list.html', {'projects': projects}
+    )
+
+
+def project_detail(request, project_id):
+    project = get_object_or_404(Project, id=project_id)
+    return render(
+        request, 'projects/project-details.html', {'project': project}
     )
 
 
 @login_required
-@require_GET
-def favorite_projects(request):
-    projects = (
-        Project.objects.filter(interested_users=request.user)
-        .select_related('owner')
-        .prefetch_related('participants', 'interested_users')
-        .order_by('-created_at')
-    )
-    return render(
-        request,
-        'projects/favorite.html',
-        {
-            'projects': projects,
-        },
-    )
+def complete_project(request, project_id):
+    project = get_object_or_404(Project, id=project_id)
 
+    # Проверка: только владелец и статус open
+    if request.user == project.owner and project.status == 'open':
+        project.status = 'closed'
+        project.save()
+        return JsonResponse({'status': 'ok', 'project_status': 'closed'})
 
-@require_GET
-def project_details(request, project_id):
-    project = get_object_or_404(
-        Project.objects.select_related('owner').prefetch_related(
-            'participants', 'interested_users'
-        ),
-        pk=project_id,
-    )
-    return render(
-        request,
-        'projects/project-details.html',
-        {
-            'project': project,
-        },
-    )
-
-
-@login_required
-@require_POST
-def toggle_favorite(request, project_id):
-    project = get_object_or_404(Project, pk=project_id)
-    if project.interested_users.filter(pk=request.user.pk).exists():
-        project.interested_users.remove(request.user)
-        favorited = False
-    else:
-        project.interested_users.add(request.user)
-        favorited = True
     return JsonResponse(
-        {
-            'status': 'ok',
-            'favorited': favorited,
-        }
+        {'status': 'error', 'message': 'Недостаточно прав'}, status=403
     )
 
 
 @login_required
-@require_POST
 def toggle_participate(request, project_id):
-    project = get_object_or_404(Project, pk=project_id)
-    if project.participants.filter(pk=request.user.pk).exists():
+    project = get_object_or_404(Project, id=project_id)
+
+    if request.user in project.participants.all():
         project.participants.remove(request.user)
-        participating = False
+        is_participating = False
     else:
         project.participants.add(request.user)
-        participating = True
+        is_participating = True
+
     return JsonResponse(
         {
             'status': 'ok',
-            'participating': participating,
+            'is_participating': is_participating,
             'participants_count': project.participants.count(),
         }
     )
 
 
 @login_required
-@require_POST
-def complete_project(request, project_id):
-    project = get_object_or_404(Project, pk=project_id)
-    if project.owner != request.user:
-        return JsonResponse(
-            {'status': 'error', 'message': 'Недостаточно прав'}, status=403
-        )
-    if project.status != 'open':
-        return JsonResponse(
-            {'status': 'error', 'message': 'Проект уже закрыт'}, status=400
-        )
-    project.status = 'closed'
-    project.save(update_fields=['status'])
-    return JsonResponse(
-        {
-            'status': 'ok',
-            'project_status': 'closed',
-        }
-    )
-
-
-@require_http_methods(['GET', 'POST'])
-def register_view(request):
-    if request.user.is_authenticated:
-        return redirect('/projects/list/')
-    if request.method == 'POST':
-        form = RegisterForm(request.POST)
-        if form.is_valid():
-            user = form.save()
-            login(request, user)
-            return redirect('/projects/list/')
-    else:
-        form = RegisterForm()
-    return render(
-        request,
-        'users/register.html',
-        {
-            'form': form,
-        },
-    )
-
-
-@require_http_methods(['GET', 'POST'])
-def login_view(request):
-    if request.user.is_authenticated:
-        return redirect('/projects/list/')
-    if request.method == 'POST':
-        form = LoginForm(request.POST, request=request)
-        if form.is_valid():
-            login(request, form.get_user())
-            return redirect('/projects/list/')
-    else:
-        form = LoginForm(request=request)
-    return render(
-        request,
-        'users/login.html',
-        {
-            'form': form,
-        },
-    )
-
-
-@login_required
-@require_GET
-def logout_view(request):
-    logout(request)
-    return redirect('/projects/list/')
-
-
-@require_GET
-def users_list(request):
-    participants = User.objects.all().order_by('id')
-    active_filter = request.GET.get('filter')
-    if request.user.is_authenticated and active_filter:
-        if active_filter == 'owners-of-favorite-projects':
-            participants = participants.filter(
-                owned_projects__interested_users=request.user
-            ).distinct()
-        elif active_filter == 'owners-of-participating-projects':
-            participants = participants.filter(
-                owned_projects__participants=request.user
-            ).distinct()
-        elif active_filter == 'interested-in-my-projects':
-            participants = participants.filter(
-                favorite_projects__owner=request.user
-            ).distinct()
-        elif active_filter == 'participants-of-my-projects':
-            participants = (
-                participants.filter(participated_projects__owner=request.user)
-                .exclude(pk=request.user.pk)
-                .distinct()
-            )
-        else:
-            active_filter = None
-    paginator = Paginator(participants, 12)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    query_prefix = ''
-    if active_filter:
-        query_prefix = f'filter={active_filter}&'
-    return render(
-        request,
-        'users/participants.html',
-        {
-            'participants': participants,
-            'page_obj': page_obj,
-            'active_filter': active_filter,
-            'query_prefix': query_prefix,
-        },
-    )
-
-
-@require_GET
-def user_details(request, user_id):
-    profile_user = get_object_or_404(
-        User.objects.prefetch_related('owned_projects__participants'),
-        pk=user_id,
-    )
-    return render(
-        request,
-        'users/user-details.html',
-        {
-            'profile_user': profile_user,
-        },
-    )
-
-
-@login_required
-@require_http_methods(['GET', 'POST'])
-def edit_profile(request):
-    if request.method == 'POST':
-        form = EditProfileForm(
-            request.POST, request.FILES, instance=request.user
-        )
-        if form.is_valid():
-            form.save()
-            return redirect(f'/users/{request.user.id}/')
-    else:
-        form = EditProfileForm(instance=request.user)
-    return render(
-        request,
-        'users/edit_profile.html',
-        {
-            'form': form,
-        },
-    )
-
-
-@login_required
-@require_http_methods(['GET', 'POST'])
-def change_password(request):
-    if request.method == 'POST':
-        form = CustomPasswordChangeForm(user=request.user, data=request.POST)
-        if form.is_valid():
-            user = form.save()
-            update_session_auth_hash(request, user)
-            return redirect(f'/users/{request.user.id}/')
-    else:
-        form = CustomPasswordChangeForm(user=request.user)
-    return render(
-        request,
-        'users/change_password.html',
-        {
-            'form': form,
-        },
-    )
-
-
-@login_required
-@require_http_methods(['GET', 'POST'])
 def create_project(request):
     if request.method == 'POST':
         form = ProjectForm(request.POST)
@@ -295,38 +68,107 @@ def create_project(request):
             project = form.save(commit=False)
             project.owner = request.user
             project.save()
+            # Добавляем автора в участники
             project.participants.add(request.user)
-            return redirect(f'/projects/{project.id}/')
+            return redirect('project_detail', project_id=project.id)
     else:
         form = ProjectForm()
+
     return render(
         request,
         'projects/create-project.html',
-        {
-            'form': form,
-            'is_edit': False,
-        },
+        {'form': form, 'is_edit': False},
     )
 
 
 @login_required
-@require_http_methods(['GET', 'POST'])
 def edit_project(request, project_id):
-    project = get_object_or_404(Project, pk=project_id)
+    project = get_object_or_404(Project, id=project_id)
+
+    # Проверка: только владелец может редактировать
     if project.owner != request.user:
-        return redirect(f'/projects/{project.id}/')
+        return redirect('project_detail', project_id=project.id)
+
     if request.method == 'POST':
         form = ProjectForm(request.POST, instance=project)
         if form.is_valid():
-            project = form.save()
-            return redirect(f'/projects/{project.id}/')
+            form.save()
+            return redirect('project_detail', project_id=project.id)
     else:
         form = ProjectForm(instance=project)
+
     return render(
         request,
         'projects/create-project.html',
+        {'form': form, 'is_edit': True, 'project': project},
+    )
+
+
+@require_http_methods(['GET'])
+def skills_autocomplete(request):
+    """GET /projects/skills/?q=<текст> — возвращает навыки для автодополнения"""
+    q = request.GET.get('q', '')
+    skills = Skill.objects.filter(name__istartswith=q).order_by('name')[:10]
+    data = [{'id': skill.id, 'name': skill.name} for skill in skills]
+    return JsonResponse(data, safe=False)
+
+
+@login_required
+@require_http_methods(['POST'])
+def add_user_skill(request, project_id):
+    """POST /projects/<project_id>/skills/add/ — добавляет навык текущему пользователю"""
+    user = request.user
+
+    import json
+
+    data = json.loads(request.body)
+    skill_id = data.get('skill_id')
+    skill_name = data.get('name')
+
+    added = False
+    created = False
+
+    if skill_id:
+        try:
+            skill = Skill.objects.get(id=skill_id)
+        except Skill.DoesNotExist:
+            return JsonResponse({'error': 'Навык не найден'}, status=404)
+    elif skill_name:
+        skill, created = Skill.objects.get_or_create(name=skill_name.strip())
+    else:
+        return JsonResponse(
+            {'error': 'Не передан skill_id или name'}, status=400
+        )
+
+    if skill not in user.skills.all():
+        user.skills.add(skill)
+        added = True
+
+    return JsonResponse(
         {
-            'form': form,
-            'is_edit': True,
-        },
+            'skill_id': skill.id,
+            'name': skill.name,
+            'created': created,
+            'added': added,
+        }
+    )
+
+
+@login_required
+@require_http_methods(['POST'])
+def remove_user_skill(request, project_id, skill_id):
+    """POST /projects/<project_id>/skills/<skill_id>/remove/ — удаляет навык у текущего пользователя"""
+    user = request.user
+
+    try:
+        skill = Skill.objects.get(id=skill_id)
+    except Skill.DoesNotExist:
+        return JsonResponse({'error': 'Навык не найден'}, status=404)
+
+    if skill in user.skills.all():
+        user.skills.remove(skill)
+        return JsonResponse({'status': 'ok'})
+
+    return JsonResponse(
+        {'error': 'У пользователя нет такого навыка'}, status=400
     )

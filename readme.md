@@ -106,3 +106,75 @@ python manage.py runserver
 
 Если в процессе разработки способ развертывания приложения поменяется, обновите `readme.md` с пометкой ревьюеру, как запускать и проверять приложение.
 
+### Используемые технологии
+
+### Backend
+- **Python 3.9+** - основной язык программирования
+- **Django 5.2.4** - высокоуровневый веб-фреймворк, обеспечивающий:
+  - ORM для работы с базой данных
+  - Аутентификацию и авторизацию пользователей
+  - Административную панель
+  - Маршрутизацию URL
+  - Обработку форм и валидацию данных
+  - Защиту от типовых веб-уязвимостей (CSRF, XSS, SQL-инъекции)
+
+### База данных
+- **PostgreSQL** - реляционная система управления базами данных
+- **Docker** - контейнеризация PostgreSQL для изолированного запуска БД
+
+### Дополнительные библиотеки
+- **python-decouple** - разделение настроек и кода через переменные окружения
+- **Pillow** - обработка и изменение размера загружаемых пользователями изображений (аватаров)
+
+### Инструменты разработки
+- **Git** - контроль версий
+- **Docker Compose** - оркестрация контейнера с PostgreSQL
+
+### Архитектурные особенности
+- **MVT (Model-View-Template)** - архитектурный паттерн Django
+- **Кастомная модель пользователя** - расширение стандартной модели User для хранения дополнительной информации (телефон, GitHub, навыки)
+- **Many-to-many связи** - связь пользователей с навыками и участников с проектами
+- **Select_related и prefetch_related** - оптимизация запросов к БД для предотвращения N+1 проблемы
+- **CBV и FBV** - комбинирование классов и функций для обработки запросов
+
+### Пример файла `.env`
+
+```env
+DJANGO_SECRET_KEY=django-insecure-your-secret-key-here
+DJANGO_DEBUG=True
+
+POSTGRES_DB=teamfinder_db
+POSTGRES_USER=teamfinder_user
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+
+TASK_VERSION=1
+```
+
+### Локальный запуск проекта
+
+```bash
+python3 -m venv venv
+venv\Scripts\activate   
+pip install -r requirements.txt
+```
+
+Настройка переменных окружения: скопируйте .env_example в .env
+
+```bash
+docker compose up -d
+```
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+```bash
+python manage.py createsuperuser
+```
+
+```bash
+python manage.py runserver
+```
+
+Приложение будет доступно по адресу: (http://localhost:8000)

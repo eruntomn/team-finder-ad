@@ -1,6 +1,11 @@
-from django.apps import AppConfig
+from django.contrib import admin
+
+from .models import Project
 
 
-class ProjectsConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'projects'
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ('title', 'owner', 'status', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('title', 'description')
+    raw_id_fields = ('owner', 'participants')

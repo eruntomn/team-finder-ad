@@ -1,7 +1,6 @@
 from django.contrib import admin
-from .models import Skill
 
-# Register your models here.
+from .models import Skill
 
 
 @admin.register(Skill)

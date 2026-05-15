@@ -1,22 +1,25 @@
-from django.shortcuts import render, get_object_or_404, redirect
-from django.db.models import Q
-from .models import User
-from skills.models import Skill
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_http_methods
-from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout, update_session_auth_hash
-from .forms import UserRegistrationForm, UserLoginForm, UserProfileForm
-from django.contrib.auth.forms import PasswordChangeForm
+from http import HTTPStatus
 
-# Create your views here.
+from django.contrib.auth import authenticate, update_session_auth_hash
+from django.contrib.auth import login as auth_login
+from django.contrib.auth import logout as auth_logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_http_methods
+
+from skills.models import Skill
+
+from .forms import UserLoginForm, UserProfileForm, UserRegistrationForm
+from .models import User
 
 
 def user_list(request):
     all_skills = Skill.objects.all()
     active_skill = request.GET.get('skill', '')
 
-    users = User.objects.all().order_by('id')
+    users = User.objects.order_by('id')
 
     if active_skill:
         users = users.filter(skills__name=active_skill)
@@ -31,16 +34,15 @@ def user_list(request):
 
 def user_profile(request, user_id):
     user = get_object_or_404(User, id=user_id)
-    projects = user.owned_projects.all().order_by('-created_at')
-    print(
-        f"Навыки пользователя {user.email}: {[s.name for s in user.skills.all()]}")
-    return render(request, 'users/user-details.html', {
-        'user': user,
-        'projects': projects
-    })
+    projects = user.owned_projects.all()
+    return render(
+        request,
+        'users/user-details.html',
+        {'user': user, 'projects': projects},
+    )
 
 
-@require_http_methods(["GET"])
+@require_http_methods(['GET'])
 def skill_autocomplete(request):
     q = request.GET.get('q', '')
     skills = Skill.objects.filter(name__istartswith=q).order_by('name')[:10]
@@ -49,10 +51,12 @@ def skill_autocomplete(request):
 
 
 @login_required
-@require_http_methods(["POST"])
+@require_http_methods(['POST'])
 def add_skill(request, user_id):
     if request.user.id != user_id:
-        return JsonResponse({'error': 'Недостаточно прав'}, status=403)
+        return JsonResponse(
+            {'error': 'Недостаточно прав'}, status=HTTPStatus.FORBIDDEN
+        )
 
     user = request.user
     skill_id = request.POST.get('skill_id')
@@ -62,106 +66,117 @@ def add_skill(request, user_id):
     created = False
 
     if skill_id:
-        try:
-            skill = Skill.objects.get(id=skill_id)
-        except Skill.DoesNotExist:
-            return JsonResponse({'error': 'Навык не найден'}, status=404)
+        skill = get_object_or_404(Skill, id=skill_id)
     elif skill_name:
         skill, created = Skill.objects.get_or_create(name=skill_name.strip())
     else:
-        return JsonResponse({'error': 'Не передан skill_id или name'}, status=400)
+        return JsonResponse(
+            {'error': 'Не передан skill_id или name'},
+            status=HTTPStatus.BAD_REQUEST,
+        )
 
     if skill not in user.skills.all():
         user.skills.add(skill)
         added = True
 
-    return JsonResponse({
-        'skill_id': skill.id,
-        'created': created,
-        'added': added
-    })
+    return JsonResponse(
+        {'skill_id': skill.id, 'created': created, 'added': added}
+    )
 
 
 @login_required
-@require_http_methods(["POST"])
+@require_http_methods(['POST'])
 def remove_skill(request, user_id, skill_id):
     if request.user.id != user_id:
-        return JsonResponse({'error': 'Недостаточно прав'}, status=403)
+        return JsonResponse(
+            {'error': 'Недостаточно прав'}, status=HTTPStatus.FORBIDDEN
+        )
 
-    try:
-        skill = Skill.objects.get(id=skill_id)
-    except Skill.DoesNotExist:
-        return JsonResponse({'error': 'Навык не найден'}, status=404)
-
+    skill = get_object_or_404(Skill, id=skill_id)
     user = request.user
+
     if skill in user.skills.all():
         user.skills.remove(skill)
         return JsonResponse({'status': 'ok'})
 
-    return JsonResponse({'error': 'У пользователя нет такого навыка'}, status=400)
+    return JsonResponse(
+        {'error': 'У пользователя нет такого навыка'},
+        status=HTTPStatus.BAD_REQUEST,
+    )
 
 
 def register(request):
     if request.method == 'POST':
-        form = UserRegistrationForm(request.POST)
-        if form.is_valid():
-            user = form.save(commit=False)
-            user.set_password(form.cleaned_data['password'])
-            user.save()
-            login(request, user)
-            return redirect('login')
-    else:
-        form = UserRegistrationForm()
+        form = UserRegistrationForm(request.POST or None)
+        if not form.is_valid():
+            return render(request, 'users/register.html', {'form': form})
 
+        user = form.save(commit=False)
+        user.set_password(form.cleaned_data['password'])
+        user.save()
+        auth_login(request, user)
+        return redirect('users:login')
+
+    form = UserRegistrationForm()
     return render(request, 'users/register.html', {'form': form})
 
 
 def user_login(request):
     if request.method == 'POST':
-        form = UserLoginForm(request.POST)
-        if form.is_valid():
-            email = form.cleaned_data['email']
-            password = form.cleaned_data['password']
-            user = authenticate(request, email=email, password=password)
-            if user is not None:
-                auth_login(request, user)
-                return redirect('project_list')
-            else:
-                form.add_error(None, 'Неверный имейл или пароль')
-    else:
-        form = UserLoginForm()
+        form = UserLoginForm(request.POST or None)
+        if not form.is_valid():
+            return render(request, 'users/login.html', {'form': form})
 
+        email = form.cleaned_data['email']
+        password = form.cleaned_data['password']
+        user = authenticate(request, email=email, password=password)
+
+        if user is None:
+            form.add_error(None, 'Неверный имейл или пароль')
+            return render(request, 'users/login.html', {'form': form})
+
+        auth_login(request, user)
+        return redirect('projects:project_list')
+
+    form = UserLoginForm()
     return render(request, 'users/login.html', {'form': form})
 
 
 def user_logout(request):
     auth_logout(request)
-    return redirect('project_list')
+    return redirect('projects:project_list')
 
 
 @login_required
 def edit_profile(request):
     user = request.user
-    if request.method == 'POST':
-        form = UserProfileForm(request.POST, request.FILES, instance=user)
-        if form.is_valid():
-            form.save()
-            return redirect('users:user_profile', user_id=user.id)
-    else:
-        form = UserProfileForm(instance=user)
 
+    if request.method == 'POST':
+        form = UserProfileForm(
+            request.POST or None, request.FILES or None, instance=user
+        )
+        if not form.is_valid():
+            return render(request, 'users/edit_profile.html', {'form': form})
+
+        form.save()
+        return redirect('users:user_profile', user_id=user.id)
+
+    form = UserProfileForm(instance=user)
     return render(request, 'users/edit_profile.html', {'form': form})
 
 
 @login_required
 def change_password(request):
     if request.method == 'POST':
-        form = PasswordChangeForm(request.user, request.POST)
-        if form.is_valid():
-            user = form.save()
-            update_session_auth_hash(request, user)
-            return redirect('users:user_profile', user_id=request.user.id)
-    else:
-        form = PasswordChangeForm(request.user)
+        form = PasswordChangeForm(request.user, request.POST or None)
+        if not form.is_valid():
+            return render(
+                request, 'users/change_password.html', {'form': form}
+            )
 
+        user = form.save()
+        update_session_auth_hash(request, user)
+        return redirect('users:user_profile', user_id=request.user.id)
+
+    form = PasswordChangeForm(request.user)
     return render(request, 'users/change_password.html', {'form': form})

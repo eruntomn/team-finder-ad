@@ -1,3 +1,6 @@
+import json
+from http import HTTPStatus
+
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,18 +11,25 @@ from skills.models import Skill
 from .forms import ProjectForm
 from .models import Project
 
-# Create your views here.
-
 
 def project_list(request):
-    projects = Project.objects.filter(status='open').order_by('-created_at')
+    projects = (
+        Project.objects.filter(status=Project.STATUS_OPEN)
+        .select_related('owner')
+        .prefetch_related('participants')
+    )
     return render(
         request, 'projects/project_list.html', {'projects': projects}
     )
 
 
 def project_detail(request, project_id):
-    project = get_object_or_404(Project, id=project_id)
+    project = get_object_or_404(
+        Project.objects.select_related('owner').prefetch_related(
+            'participants'
+        ),
+        id=project_id,
+    )
     return render(
         request, 'projects/project-details.html', {'project': project}
     )
@@ -29,14 +39,16 @@ def project_detail(request, project_id):
 def complete_project(request, project_id):
     project = get_object_or_404(Project, id=project_id)
 
-    # Проверка: только владелец и статус open
-    if request.user == project.owner and project.status == 'open':
-        project.status = 'closed'
+    if request.user == project.owner and project.status == Project.STATUS_OPEN:
+        project.status = Project.STATUS_CLOSED
         project.save()
-        return JsonResponse({'status': 'ok', 'project_status': 'closed'})
+        return JsonResponse(
+            {'status': 'ok', 'project_status': Project.STATUS_CLOSED}
+        )
 
     return JsonResponse(
-        {'status': 'error', 'message': 'Недостаточно прав'}, status=403
+        {'status': 'error', 'message': 'Недостаточно прав'},
+        status=HTTPStatus.FORBIDDEN,
     )
 
 
@@ -63,17 +75,21 @@ def toggle_participate(request, project_id):
 @login_required
 def create_project(request):
     if request.method == 'POST':
-        form = ProjectForm(request.POST)
-        if form.is_valid():
-            project = form.save(commit=False)
-            project.owner = request.user
-            project.save()
-            # Добавляем автора в участники
-            project.participants.add(request.user)
-            return redirect('project_detail', project_id=project.id)
-    else:
-        form = ProjectForm()
+        form = ProjectForm(request.POST or None)
+        if not form.is_valid():
+            return render(
+                request,
+                'projects/create-project.html',
+                {'form': form, 'is_edit': False},
+            )
 
+        project = form.save(commit=False)
+        project.owner = request.user
+        project.save()
+        project.participants.add(request.user)
+        return redirect('project_detail', project_id=project.id)
+
+    form = ProjectForm()
     return render(
         request,
         'projects/create-project.html',
@@ -85,18 +101,22 @@ def create_project(request):
 def edit_project(request, project_id):
     project = get_object_or_404(Project, id=project_id)
 
-    # Проверка: только владелец может редактировать
     if project.owner != request.user:
         return redirect('project_detail', project_id=project.id)
 
     if request.method == 'POST':
-        form = ProjectForm(request.POST, instance=project)
-        if form.is_valid():
-            form.save()
-            return redirect('project_detail', project_id=project.id)
-    else:
-        form = ProjectForm(instance=project)
+        form = ProjectForm(request.POST or None, instance=project)
+        if not form.is_valid():
+            return render(
+                request,
+                'projects/create-project.html',
+                {'form': form, 'is_edit': True, 'project': project},
+            )
 
+        form.save()
+        return redirect('project_detail', project_id=project.id)
+
+    form = ProjectForm(instance=project)
     return render(
         request,
         'projects/create-project.html',
@@ -106,7 +126,6 @@ def edit_project(request, project_id):
 
 @require_http_methods(['GET'])
 def skills_autocomplete(request):
-    """GET /projects/skills/?q=<текст> — возвращает навыки для автодополнения"""
     q = request.GET.get('q', '')
     skills = Skill.objects.filter(name__istartswith=q).order_by('name')[:10]
     data = [{'id': skill.id, 'name': skill.name} for skill in skills]
@@ -116,10 +135,7 @@ def skills_autocomplete(request):
 @login_required
 @require_http_methods(['POST'])
 def add_user_skill(request, project_id):
-    """POST /projects/<project_id>/skills/add/ — добавляет навык текущему пользователю"""
     user = request.user
-
-    import json
 
     data = json.loads(request.body)
     skill_id = data.get('skill_id')
@@ -129,15 +145,13 @@ def add_user_skill(request, project_id):
     created = False
 
     if skill_id:
-        try:
-            skill = Skill.objects.get(id=skill_id)
-        except Skill.DoesNotExist:
-            return JsonResponse({'error': 'Навык не найден'}, status=404)
+        skill = get_object_or_404(Skill, id=skill_id)
     elif skill_name:
         skill, created = Skill.objects.get_or_create(name=skill_name.strip())
     else:
         return JsonResponse(
-            {'error': 'Не передан skill_id или name'}, status=400
+            {'error': 'Не передан skill_id или name'},
+            status=HTTPStatus.BAD_REQUEST,
         )
 
     if skill not in user.skills.all():
@@ -157,18 +171,14 @@ def add_user_skill(request, project_id):
 @login_required
 @require_http_methods(['POST'])
 def remove_user_skill(request, project_id, skill_id):
-    """POST /projects/<project_id>/skills/<skill_id>/remove/ — удаляет навык у текущего пользователя"""
     user = request.user
-
-    try:
-        skill = Skill.objects.get(id=skill_id)
-    except Skill.DoesNotExist:
-        return JsonResponse({'error': 'Навык не найден'}, status=404)
+    skill = get_object_or_404(Skill, id=skill_id)
 
     if skill in user.skills.all():
         user.skills.remove(skill)
         return JsonResponse({'status': 'ok'})
 
     return JsonResponse(
-        {'error': 'У пользователя нет такого навыка'}, status=400
+        {'error': 'У пользователя нет такого навыка'},
+        status=HTTPStatus.BAD_REQUEST,
     )

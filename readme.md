@@ -178,3 +178,5 @@ python manage.py runserver
 ```
 
 Приложение будет доступно по адресу: (http://localhost:8000)
+
+Пометка для ревьюера: isort сработал, но в файле users/admin.py ничего не поменялось. поменялось в файлах users/urls.py, users/views.py

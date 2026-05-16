@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 
 from skills.models import Skill
 
+from .constants import SKILL_AUTOCOMPLETE_LIMIT
 from .forms import UserLoginForm, UserProfileForm, UserRegistrationForm
 from .models import User
 
@@ -19,7 +20,7 @@ def user_list(request):
     all_skills = Skill.objects.all()
     active_skill = request.GET.get('skill', '')
 
-    users = User.objects.order_by('id')
+    users = User.objects.all()
 
     if active_skill:
         users = users.filter(skills__name=active_skill)
@@ -45,14 +46,19 @@ def user_profile(request, user_id):
 @require_http_methods(['GET'])
 def skill_autocomplete(request):
     q = request.GET.get('q', '')
-    skills = Skill.objects.filter(name__istartswith=q).order_by('name')[:10]
+    skills = Skill.objects.filter(name__istartswith=q).order_by('name')[
+        :SKILL_AUTOCOMPLETE_LIMIT
+    ]
     data = [{'id': skill.id, 'name': skill.name} for skill in skills]
     return JsonResponse(data, safe=False)
 
 
 @login_required
 @require_http_methods(['POST'])
-def add_skill(request, user_id):
+def add_skill(request, user_id=None):
+    if user_id is None:
+        user_id = request.user.id
+
     if request.user.id != user_id:
         return JsonResponse(
             {'error': 'Недостаточно прав'}, status=HTTPStatus.FORBIDDEN
@@ -86,7 +92,10 @@ def add_skill(request, user_id):
 
 @login_required
 @require_http_methods(['POST'])
-def remove_skill(request, user_id, skill_id):
+def remove_skill(request, user_id=None, skill_id=None):
+    if user_id is None:
+        user_id = request.user.id
+
     if request.user.id != user_id:
         return JsonResponse(
             {'error': 'Недостаточно прав'}, status=HTTPStatus.FORBIDDEN
@@ -106,40 +115,40 @@ def remove_skill(request, user_id, skill_id):
 
 
 def register(request):
-    if request.method == 'POST':
-        form = UserRegistrationForm(request.POST or None)
-        if not form.is_valid():
-            return render(request, 'users/register.html', {'form': form})
+    if request.method != 'POST':
+        form = UserRegistrationForm()
+        return render(request, 'users/register.html', {'form': form})
 
-        user = form.save(commit=False)
-        user.set_password(form.cleaned_data['password'])
-        user.save()
-        auth_login(request, user)
-        return redirect('users:login')
+    form = UserRegistrationForm(request.POST or None)
+    if not form.is_valid():
+        return render(request, 'users/register.html', {'form': form})
 
-    form = UserRegistrationForm()
-    return render(request, 'users/register.html', {'form': form})
+    user = form.save(commit=False)
+    user.set_password(form.cleaned_data['password'])
+    user.save()
+    auth_login(request, user)
+    return redirect('users:login')
 
 
 def user_login(request):
-    if request.method == 'POST':
-        form = UserLoginForm(request.POST or None)
-        if not form.is_valid():
-            return render(request, 'users/login.html', {'form': form})
+    if request.method != 'POST':
+        form = UserLoginForm()
+        return render(request, 'users/login.html', {'form': form})
 
-        email = form.cleaned_data['email']
-        password = form.cleaned_data['password']
-        user = authenticate(request, email=email, password=password)
+    form = UserLoginForm(request.POST or None)
+    if not form.is_valid():
+        return render(request, 'users/login.html', {'form': form})
 
-        if user is None:
-            form.add_error(None, 'Неверный имейл или пароль')
-            return render(request, 'users/login.html', {'form': form})
+    email = form.cleaned_data['email']
+    password = form.cleaned_data['password']
+    user = authenticate(request, email=email, password=password)
 
-        auth_login(request, user)
-        return redirect('projects:project_list')
+    if user is None:
+        form.add_error(None, 'Неверный имейл или пароль')
+        return render(request, 'users/login.html', {'form': form})
 
-    form = UserLoginForm()
-    return render(request, 'users/login.html', {'form': form})
+    auth_login(request, user)
+    return redirect('projects:project_list')
 
 
 def user_logout(request):
@@ -151,32 +160,30 @@ def user_logout(request):
 def edit_profile(request):
     user = request.user
 
-    if request.method == 'POST':
-        form = UserProfileForm(
-            request.POST or None, request.FILES or None, instance=user
-        )
-        if not form.is_valid():
-            return render(request, 'users/edit_profile.html', {'form': form})
+    if request.method != 'POST':
+        form = UserProfileForm(instance=user)
+        return render(request, 'users/edit_profile.html', {'form': form})
 
-        form.save()
-        return redirect('users:user_profile', user_id=user.id)
+    form = UserProfileForm(
+        request.POST or None, request.FILES or None, instance=user
+    )
+    if not form.is_valid():
+        return render(request, 'users/edit_profile.html', {'form': form})
 
-    form = UserProfileForm(instance=user)
-    return render(request, 'users/edit_profile.html', {'form': form})
+    form.save()
+    return redirect('users:user_profile', user_id=user.id)
 
 
 @login_required
 def change_password(request):
-    if request.method == 'POST':
-        form = PasswordChangeForm(request.user, request.POST or None)
-        if not form.is_valid():
-            return render(
-                request, 'users/change_password.html', {'form': form}
-            )
+    if request.method != 'POST':
+        form = PasswordChangeForm(request.user)
+        return render(request, 'users/change_password.html', {'form': form})
 
-        user = form.save()
-        update_session_auth_hash(request, user)
-        return redirect('users:user_profile', user_id=request.user.id)
+    form = PasswordChangeForm(request.user, request.POST or None)
+    if not form.is_valid():
+        return render(request, 'users/change_password.html', {'form': form})
 
-    form = PasswordChangeForm(request.user)
-    return render(request, 'users/change_password.html', {'form': form})
+    user = form.save()
+    update_session_auth_hash(request, user)
+    return redirect('users:user_profile', user_id=request.user.id)

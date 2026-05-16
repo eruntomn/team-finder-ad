@@ -1,0 +1,2 @@
+GITHUB_URL_PREFIX = 'https://github.com/'
+PROJECT_TITLE_MAX_LENGTH = 200

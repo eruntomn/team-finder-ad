@@ -2,6 +2,8 @@ from django.db import models
 
 from users.models import User
 
+from .constants import PROJECT_TITLE_MAX_LENGTH
+
 
 class Project(models.Model):
     STATUS_OPEN = 'open'
@@ -12,7 +14,7 @@ class Project(models.Model):
         (STATUS_CLOSED, 'Закрыт'),
     ]
 
-    title = models.CharField('Название', max_length=200)
+    title = models.CharField('Название', max_length=PROJECT_TITLE_MAX_LENGTH)
     description = models.TextField('Описание')
     owner = models.ForeignKey(
         User,

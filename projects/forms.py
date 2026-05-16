@@ -1,14 +1,17 @@
 from django import forms
 
+from .constants import GITHUB_URL_PREFIX
 from .models import Project
 
 
 class ProjectForm(forms.ModelForm):
     class Meta:
         model = Project
-        fields = ['name', 'description', 'github_url', 'status']
+        fields = ['title', 'description', 'github_url', 'status']
         widgets = {
-            'name': forms.TextInput(attrs={'placeholder': 'Название проекта'}),
+            'title': forms.TextInput(
+                attrs={'placeholder': 'Название проекта'}
+            ),
             'description': forms.Textarea(
                 attrs={'rows': 5, 'placeholder': 'Описание проекта'}
             ),
@@ -20,9 +23,8 @@ class ProjectForm(forms.ModelForm):
 
     def clean_github_url(self):
         url = self.cleaned_data.get('github_url')
-        if url:
-            if not url.startswith('https://github.com/'):
-                raise forms.ValidationError(
-                    'Ссылка должна вести на GitHub (https://github.com/...)'
-                )
+        if url and not url.startswith(GITHUB_URL_PREFIX):
+            raise forms.ValidationError(
+                f'Ссылка должна вести на GitHub ({GITHUB_URL_PREFIX}...)'
+            )
         return url

@@ -46,7 +46,7 @@ def user_profile(request, user_id):
 @require_http_methods(['GET'])
 def skill_autocomplete(request):
     q = request.GET.get('q', '')
-    skills = Skill.objects.filter(name__istartswith=q).order_by('name')[
+    skills = Skill.objects.filter(name__istartswith=q)[
         :SKILL_AUTOCOMPLETE_LIMIT
     ]
     data = [{'id': skill.id, 'name': skill.name} for skill in skills]

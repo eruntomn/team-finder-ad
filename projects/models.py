@@ -16,6 +16,7 @@ class Project(models.Model):
 
     title = models.CharField('Название', max_length=PROJECT_TITLE_MAX_LENGTH)
     description = models.TextField('Описание')
+    github_url = models.URLField('Ссылка на GitHub', blank=True, default='')
     owner = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
